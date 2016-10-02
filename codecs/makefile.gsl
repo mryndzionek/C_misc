@@ -1,0 +1,193 @@
+.macro gen_file_list (direl, regex)
+.   my.dir = directory.open ("$(project.root)/$(my.direl.name:)") ?
+.   if defined(my.dir)
+.       for my.dir.file as f by name
+.           if regexp.match (my.regex, "$(f.name:)")
+.               for my.direl.exclude as ex where ex.name = f.name
+.               else
+.                   new my.direl.file
+.                       define file.name = "$(f.name:)"
+.                   endnew
+.               endfor
+.           endif
+.       endfor
+.   else
+.       abort "E: Unable to find dir: $(my.direl.name:)"
+.   endif
+.endmacro
+.
+.echo "Creating file $(project.root:)/Makefile"
+.output "$(project.root:)/Makefile"
+.cross_prefix ?= ""
+.bindir ?= "bin"
+.objdir ?= "obj"
+.generated_warning_header ?= "\
+####################################################################
+#  THIS FILE IS 100% GENERATED; DO NOT EDIT EXCEPT EXPERIMENTALLY  #
+####################################################################"
+$(GENERATED_WARNING_HEADER:)
+
+# Toolchain executables
+CC = $(cross_prefix)gcc
+LD = $(cross_prefix)ld
+OBJDUMP = $(cross_prefix)objdump
+OBJCOPY = $(cross_prefix)objcopy
+SIZE = $(cross_prefix)size
+NM = $(cross_prefix)nm
+
+.for exec
+.   for includes
+.       for dir
+.           for project.include as inc where inc.name = dir.name
+.           else
+.               copy dir to project as include
+.           endfor
+.       endfor
+.   endfor
+.endfor
+.for exec
+.   for sources
+.       for dir
+.           for project.srcdir as src where src.name = dir.name
+.           else
+.               copy dir to project as srcdir
+.           endfor
+.       endfor
+.       for file
+.           for project.srcfile as src where src.name = file.name
+.           else
+.               copy file to project as srcfile
+.           endfor
+.       endfor
+.   endfor
+.endfor
+# Include files
+INCLUDES = \\
+.for include
+    -I$(include.name:) \\
+.endfor
+
+# Source files
+SOURCES = \\
+.for srcdir
+.   gen_file_list (srcdir, ".*\.c$")
+.   for srcdir.file
+    $(srcdir.name:)/$(file.name:) \\
+.   endfor
+.endfor
+.for srcfile
+    $(srcfile.name:) \\
+.endfor
+
+# Global defines
+CFLAGS += \\
+.for defines
+.   for define by name
+    -D$(define.name:)\
+.       if defined (define.value)
+=$(define.value:) \\
+.       endif
+.   endfor
+.endfor
+
+# Global C flags
+.for cflags
+CFLAGS += $(string.trim (cflags.):no,left)
+.endfor
+
+# Global linker flags
+.for ldflags
+LDFLAGS += $(string.trim (ldflags.):no,left)
+.endfor
+
+# Global libraries
+.for libs
+LIBS += $(string.trim (libs.):no,left)
+.endfor
+
+OBJECTS = \$(patsubst %.c, $(objdir)/%.o, \$(SOURCES))
+THIS_MAKEFILE := \$(lastword \$(MAKEFILE_LIST))
+CFLAGS += \$(INCLUDES)
+
+.for exec
+SOURCES_$(exec.name:) = \\
+.   for sources
+.       for dir
+.           gen_file_list (dir, ".*\.c$")
+.           for dir.file
+    $(dir.name:)/$(file.name:) \\
+.           endfor
+.       endfor
+.       for file
+    $(file.name:) \\
+.       endfor
+.   endfor
+
+OBJECTS_$(exec.name:) = \$(patsubst %.c, $(objdir)/%.o, \$(SOURCES_$(exec.name:)))
+
+.endfor
+V ?= 0
+Q_0 := @
+Q_1 := 
+Q = \$(Q_\$(V))
+
+\.SUFFIXES:
+\.PHONY: all clean
+
+define loginfo
+      \$(Q)tput setaf 6
+      \$(Q)tput bold
+      \$(Q)echo $1
+      \$(Q)tput sgr0
+endef
+
+define logerror
+      \$(Q)tput setaf 1
+      \$(Q)tput bold
+      \$(Q)echo $1
+      \$(Q)tput sgr0
+endef
+
+all: build
+
+build: \
+.for exec
+$(exec.name:)\
+.   if last ()
+
+.   else
+ \
+.   endif
+.endfor
+
+.for exec
+$(exec.name:): \$(OBJECTS_$(exec.name:)) \$(THIS_MAKEFILE)
+	\$(call loginfo,"Linking exec" $@)
+	\$(Q)\$(CC) \$(LDFLAGS) -Wl,-M=$(bindir)/$@.map \$(CFLAGS) \$(OBJECTS_$(exec.name:)) \$(LIBS) -o $(bindir)/$@.elf
+	\$(Q)\$(NM) $(bindir)/$@.elf >$(bindir)/$@.elf.txt
+	\$(Q)\$(OBJCOPY) -O binary $(bindir)/$@.elf $(bindir)/$@.bin
+	\$(Q)\$(SIZE) \$(OBJECTS_$(exec.name:)) $(bindir)/$@.elf
+
+.endfor
+\$(OBJECTS): | $(bindir) $(objdir)
+
+$(bindir):
+	\$(Q)mkdir -p $@
+
+$(objdir):
+	\$(Q)mkdir -p $@
+
+obj/%.o: %.c \$(THIS_MAKEFILE)
+	\$(call loginfo,"Compiling file" $@)
+	\$(Q)mkdir -p \$(dir $@)
+	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td \$(CFLAGS) -c \$< -o $@
+	\$(Q)mv -f obj/$*.Td obj/$*.d
+
+clean:
+	\$(Q)rm -R $(bindir)
+	\$(Q)rm -R $(objdir)
+
+$(objdir)/%.d: ;
+\.PRECIOUS: $(objdir)/%.d
+
+-include \$(patsubst %,$(objdir)/%.d,\$(basename \$(SOURCES)))
