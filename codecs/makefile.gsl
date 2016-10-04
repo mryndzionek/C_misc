@@ -1,21 +1,58 @@
-.macro gen_file_list (direl, regex)
-.   my.dir = directory.open ("$(project.root)/$(my.direl.name:)") ?
-.   if defined(my.dir)
-.       for my.dir.file as f by name
-.           if regexp.match (my.regex, "$(f.name:)")
-.               for my.direl.exclude as ex where ex.name = f.name
-.               else
-.                   new my.direl.file
-.                       define file.name = "$(f.name:)"
-.                   endnew
-.               endfor
-.           endif
-.       endfor
-.   else
-.       abort "E: Unable to find dir: $(my.direl.name:)"
-.   endif
-.endmacro
-.
+.template 0
+function verify_format ()
+    # Check if all include directories exist
+    for exec
+        for includes
+            for dir
+                if ! file.exists (dir.name)
+                    echo "E: The include directory $(dir.name:) does not exist"
+                    return -1
+                endif
+            endfor
+        endfor
+    endfor
+    return 0
+endfunction
+function gen_file_list (direl, regex)
+    my.dir = directory.open ("$(project.root)/$(my.direl.name:)") ?
+    if defined(my.dir)
+        for my.dir.file as f by name
+            if regexp.match (my.regex, "$(f.name:)")
+                for my.direl.exclude as ex where ex.name = f.name
+                else
+                    new my.direl.file
+                        define file.name = "$(f.name:)"
+                    endnew
+                endfor
+            endif
+        endfor
+    else
+        abort "E: Unable to find dir: $(my.direl.name:)"
+    endif
+endfunction
+function rm_rel (name)
+    n = regexp.match ("((\.\./)*)(.*)", my.name, m1, m2, m3)
+    if n = 3
+        nm = m3
+        if string.length (m1) > 0
+            for project.vpath as vp where vp.name = m1
+            else
+                new vpn
+                    define vpn.name = "$(m1)"
+                    copy vpn to project as vpath
+                endnew
+            endfor
+        endif
+    else
+        abort "E: Fatal error"
+    endif
+    return nm
+endfunction
+endtemplate
+.s = verify_format ()
+.if s = -1
+.   abort 'E: Code generation failed'
+.endif
 .echo "Creating file $(project.root:)/Makefile"
 .output "$(project.root:)/Makefile"
 .cross_prefix ?= ""
@@ -72,11 +109,11 @@ SOURCES = \\
 .for srcdir
 .   gen_file_list (srcdir, ".*\.c$")
 .   for srcdir.file
-    $(srcdir.name:)/$(file.name:) \\
+    $(rm_rel (srcdir.name):)/$(file.name:) \\
 .   endfor
 .endfor
 .for srcfile
-    $(srcfile.name:) \\
+    $( rm_rel (srcfile.name):) \\
 .endfor
 
 # Global defines
@@ -86,6 +123,8 @@ CFLAGS += \\
     -D$(define.name:)\
 .       if defined (define.value)
 =$(define.value:) \\
+.       else
+ \\
 .       endif
 .   endfor
 .endfor
@@ -115,17 +154,23 @@ SOURCES_$(exec.name:) = \\
 .       for dir
 .           gen_file_list (dir, ".*\.c$")
 .           for dir.file
-    $(dir.name:)/$(file.name:) \\
+    $(rm_rel (dir.name):)/$(file.name:) \\
 .           endfor
 .       endfor
 .       for file
-    $(file.name:) \\
+    $(rm_rel (file.name):) \\
 .       endfor
 .   endfor
 
 OBJECTS_$(exec.name:) = \$(patsubst %.c, $(objdir)/%.o, \$(SOURCES_$(exec.name:)))
 
 .endfor
+
+VPATH += \\
+.for vpath
+    $(name) \\
+.endfor
+
 V ?= 0
 Q_0 := @
 Q_1 := 
@@ -135,17 +180,11 @@ Q = \$(Q_\$(V))
 \.PHONY: all clean
 
 define loginfo
-      \$(Q)tput setaf 6
-      \$(Q)tput bold
       \$(Q)echo $1
-      \$(Q)tput sgr0
 endef
 
 define logerror
-      \$(Q)tput setaf 1
-      \$(Q)tput bold
       \$(Q)echo $1
-      \$(Q)tput sgr0
 endef
 
 all: build
@@ -178,7 +217,7 @@ $(objdir):
 	\$(Q)mkdir -p $@
 
 obj/%.o: %.c \$(THIS_MAKEFILE)
-	\$(call loginfo,"Compiling file" $@)
+	\$(call loginfo,"Compiling file" $<)
 	\$(Q)mkdir -p \$(dir $@)
 	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td \$(CFLAGS) -c \$< -o $@
 	\$(Q)mv -f obj/$*.Td obj/$*.d
