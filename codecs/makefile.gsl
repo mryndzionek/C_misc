@@ -10,11 +10,29 @@ function verify_format ()
                 endif
             endfor
         endfor
+        for sources
+            for dir
+                if ! file.exists (dir.name)
+                    echo "E: The source directory $(dir.name:) does not exist"
+                    return -1
+                endif
+            endfor
+            for file as f
+                if ! file.exists (f.name)
+                    echo "E: The source file $(f.name:) does not exist"
+                    return -1
+                endif
+            endfor
+        endfor
     endfor
     return 0
 endfunction
 function gen_file_list (direl, regex)
-    my.dir = directory.open ("$(project.root)/$(my.direl.name:)") ?
+    if string.substr (my.direl.name, 0, 0) = "/"
+        my.dir = directory.open ("$(my.direl.name:)") ?
+    else
+        my.dir = directory.open ("$(rootdir)/$(my.direl.name:)") ?
+    endif
     if defined(my.dir)
         for my.dir.file as f by name
             if regexp.match (my.regex, "$(f.name:)")
@@ -48,13 +66,24 @@ function rm_rel (name)
     endif
     return nm
 endfunction
+function get_filename (path)
+    n = regexp.match ("^(.+/)*(.+)\.(.+)$", my.path, m1, m2, m3)
+    if n = 3
+        return m2 + "." + m3
+    else
+        abort "E: The filename was not matched"
+    endif
+endfunction
+function get_dirname (path)
+    n = regexp.match ("^(.+/)*(.+)\.(.+)$", my.path, m1, m2, m3)
+    if n = 3
+        return m1
+    else
+        abort "E: The dirname was not matched"
+    endif
+endfunction
 endtemplate
-.s = verify_format ()
-.if s = -1
-.   abort 'E: Code generation failed'
-.endif
-.echo "Creating file $(project.root:)/Makefile"
-.output "$(project.root:)/Makefile"
+.rootdir ?= "."
 .cross_prefix ?= ""
 .bindir ?= "bin"
 .objdir ?= "obj"
@@ -62,6 +91,12 @@ endtemplate
 ####################################################################
 #  THIS FILE IS 100% GENERATED; DO NOT EDIT EXCEPT EXPERIMENTALLY  #
 ####################################################################"
+.s = verify_format ()
+.if s = -1
+.   abort 'E: Code generation failed'
+.endif
+.echo "Creating file $(rootdir:)/Makefile"
+.output "$(rootdir:)/Makefile"
 $(GENERATED_WARNING_HEADER:)
 
 # Toolchain executables
@@ -113,7 +148,7 @@ SOURCES = \\
 .   endfor
 .endfor
 .for srcfile
-    $( rm_rel (srcfile.name):) \\
+    $(rm_rel (get_dirname(srcfile.name)):)$(get_filename(srcfile.name):) \\
 .endfor
 
 # Global defines
@@ -157,8 +192,8 @@ SOURCES_$(exec.name:) = \\
     $(rm_rel (dir.name):)/$(file.name:) \\
 .           endfor
 .       endfor
-.       for file
-    $(rm_rel (file.name):) \\
+.       for file as f
+    $(rm_rel (get_dirname(f.name)):)$(get_filename (f.name):) \\
 .       endfor
 .   endfor
 
