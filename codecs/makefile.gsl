@@ -3,6 +3,7 @@ function verify_format ()
     # Check if all include directories exist
     for exec
         for includes
+            expand_paths (includes)
             for dir
                 if ! file.exists (dir.name)
                     echo "E: The include directory $(dir.name:) does not exist"
@@ -11,6 +12,7 @@ function verify_format ()
             endfor
         endfor
         for sources
+            expand_paths (sources)
             for dir
                 if ! file.exists (dir.name)
                     echo "E: The source directory $(dir.name:) does not exist"
@@ -52,6 +54,11 @@ function rm_rel (name)
     n = regexp.match ("((\.\./)*)(.*)", my.name, m1, m2, m3)
     if n = 3
         nm = m3
+        if string.length (nm) > 0
+            if ! regexp.match ("^.*/$", nm)
+                nm += "/"
+            endif
+        endif
         if string.length (m1) > 0
             for project.vpath as vp where vp.name = m1
             else
@@ -62,7 +69,7 @@ function rm_rel (name)
             endfor
         endif
     else
-        abort "E: Fatal error"
+        abort "E: The path was not matched"
     endif
     return nm
 endfunction
@@ -82,6 +89,16 @@ function get_dirname (path)
         abort "E: The dirname was not matched"
     endif
 endfunction
+function expand_paths (elem)
+    for project.path
+        for my.elem.dir
+            dir.name = string.replace (dir.name, "\$(" + path.name + ")|" + path.dest)
+        endfor
+        for my.elem.file
+            file.name = string.replace (file.name, "\$(" + path.name + ")|" + path.dest)
+        endfor
+    endfor
+endfunction
 endtemplate
 .rootdir ?= "."
 .cross_prefix ?= ""
@@ -97,15 +114,16 @@ endtemplate
 .endif
 .echo "Creating file $(rootdir:)/Makefile"
 .output "$(rootdir:)/Makefile"
-$(GENERATED_WARNING_HEADER:)
+$(string.trim (GENERATED_WARNING_HEADER):left, block)
 
 # Toolchain executables
-CC = $(cross_prefix)gcc
-LD = $(cross_prefix)ld
-OBJDUMP = $(cross_prefix)objdump
-OBJCOPY = $(cross_prefix)objcopy
-SIZE = $(cross_prefix)size
-NM = $(cross_prefix)nm
+CROSS_COMPILE = $(cross_prefix)
+CC = \$(CROSS_COMPILE)gcc
+LD = \$(CROSS_COMPILE)ld
+OBJDUMP = \$(CROSS_COMPILE)objdump
+OBJCOPY = \$(CROSS_COMPILE)objcopy
+SIZE = \$(CROSS_COMPILE)size
+NM = \$(CROSS_COMPILE)nm
 
 .for exec
 .   for includes
@@ -141,10 +159,10 @@ INCLUDES = \\
 
 # Source files
 SOURCES = \\
-.for srcdir
+.for srcdir by name
 .   gen_file_list (srcdir, ".*\.c$")
-.   for srcdir.file
-    $(rm_rel (srcdir.name):)/$(file.name:) \\
+.   for srcdir.file by name
+    $(rm_rel (srcdir.name):)$(file.name:) \\
 .   endfor
 .endfor
 .for srcfile
@@ -186,10 +204,10 @@ CFLAGS += \$(INCLUDES)
 .for exec
 SOURCES_$(exec.name:) = \\
 .   for sources
-.       for dir
+.       for dir by name
 .           gen_file_list (dir, ".*\.c$")
-.           for dir.file
-    $(rm_rel (dir.name):)/$(file.name:) \\
+.           for dir.file by name
+    $(rm_rel (dir.name):)$(file.name:) \\
 .           endfor
 .       endfor
 .       for file as f
@@ -200,7 +218,6 @@ SOURCES_$(exec.name:) = \\
 OBJECTS_$(exec.name:) = \$(patsubst %.c, $(objdir)/%.o, \$(SOURCES_$(exec.name:)))
 
 .endfor
-
 VPATH += \\
 .for vpath
     $(name) \\
@@ -215,11 +232,11 @@ Q = \$(Q_\$(V))
 \.PHONY: all clean
 
 define loginfo
-      \$(Q)echo $1
+      \$(Q)echo "[INFO] $1"
 endef
 
 define logerror
-      \$(Q)echo $1
+      \$(Q)echo "[ERR ] $1"
 endef
 
 all: build
@@ -251,7 +268,7 @@ $(bindir):
 $(objdir):
 	\$(Q)mkdir -p $@
 
-obj/%.o: %.c \$(THIS_MAKEFILE)
+$(objdir)/%.o: %.c \$(THIS_MAKEFILE)
 	\$(call loginfo,"Compiling file" $<)
 	\$(Q)mkdir -p \$(dir $@)
 	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td \$(CFLAGS) -c \$< -o $@
