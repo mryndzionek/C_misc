@@ -104,6 +104,7 @@ endtemplate
 .cross_prefix ?= ""
 .bindir ?= "bin"
 .objdir ?= "obj"
+.optflags ?= "-O0"
 .generated_warning_header ?= "\
 ####################################################################
 #  THIS FILE IS 100% GENERATED; DO NOT EDIT EXCEPT EXPERIMENTALLY  #
@@ -135,38 +136,10 @@ NM = \$(CROSS_COMPILE)nm
 .       endfor
 .   endfor
 .endfor
-.for exec
-.   for sources
-.       for dir
-.           for project.srcdir as src where src.name = dir.name
-.           else
-.               copy dir to project as srcdir
-.           endfor
-.       endfor
-.       for file
-.           for project.srcfile as src where src.name = file.name
-.           else
-.               copy file to project as srcfile
-.           endfor
-.       endfor
-.   endfor
-.endfor
 # Include files
 INCLUDES = \\
 .for include
     -I$(include.name:) \\
-.endfor
-
-# Source files
-SOURCES = \\
-.for srcdir by name
-.   gen_file_list (srcdir, ".*\.c$")
-.   for srcdir.file by name
-    $(rm_rel (srcdir.name):)$(file.name:) \\
-.   endfor
-.endfor
-.for srcfile
-    $(rm_rel (get_dirname(srcfile.name)):)$(get_filename(srcfile.name):) \\
 .endfor
 
 # Global defines
@@ -197,7 +170,6 @@ LDFLAGS += $(string.trim (ldflags.):no,left)
 LIBS += $(string.trim (libs.):no,left)
 .endfor
 
-OBJECTS = \$(patsubst %.c, $(objdir)/%.o, \$(SOURCES))
 THIS_MAKEFILE := \$(lastword \$(MAKEFILE_LIST))
 CFLAGS += \$(INCLUDES)
 
@@ -215,10 +187,11 @@ SOURCES_$(exec.name:) = \\
 .       endfor
 .   endfor
 
-OBJECTS_$(exec.name:) = \$(patsubst %.c, $(objdir)/%.o, \$(SOURCES_$(exec.name:)))
+C_OBJ_$(exec.name:) = \$(patsubst %.c, $(objdir)/%.o, \$(filter %.c, \$(SOURCES_$(exec.name:))))
+ASM_OBJ_$(exec.name:) = \$(patsubst %.S, $(objdir)/%.o, \$(filter %.S, \$(SOURCES_$(exec.name:))))
 
 .endfor
-VPATH += \\
+vpath %.c \\
 .for vpath
     $(name) \\
 .endfor
@@ -252,15 +225,20 @@ $(exec.name:)\
 .endfor
 
 .for exec
-$(exec.name:): \$(OBJECTS_$(exec.name:)) \$(THIS_MAKEFILE)
+$(exec.name:): \$(C_OBJ_$(exec.name:)) \$(ASM_OBJ_$(exec.name:)) \$(THIS_MAKEFILE)
 	\$(call loginfo,"Linking exec" $@)
-	\$(Q)\$(CC) \$(LDFLAGS) -Wl,-M=$(bindir)/$@.map \$(CFLAGS) \$(OBJECTS_$(exec.name:)) \$(LIBS) -o $(bindir)/$@.elf
+	\$(Q)\$(CC) \$(LDFLAGS) -Wl,-M=$(bindir)/$@.map \$(CFLAGS) \\
+		\$(C_OBJ_$(exec.name:)) \$(ASM_OBJ_$(exec.name:)) \$(LIBS) -o $(bindir)/$@.elf
 	\$(Q)\$(NM) $(bindir)/$@.elf >$(bindir)/$@.elf.txt
 	\$(Q)\$(OBJCOPY) -O binary $(bindir)/$@.elf $(bindir)/$@.bin
-	\$(Q)\$(SIZE) \$(OBJECTS_$(exec.name:)) $(bindir)/$@.elf
+	\$(Q)\$(SIZE) \$(C_OBJ_$(exec.name:)) $(bindir)/$@.elf
 
 .endfor
-\$(OBJECTS): | $(bindir) $(objdir)
+.for exec
+\$(C_OBJ_$(exec.name:)) \
+\$(ASM_OBJ_$(exec.name:)) \
+.endfor
+: | $(bindir) $(objdir)
 
 $(bindir):
 	\$(Q)mkdir -p $@
@@ -269,16 +247,26 @@ $(objdir):
 	\$(Q)mkdir -p $@
 
 $(objdir)/%.o: %.c \$(THIS_MAKEFILE)
-	\$(call loginfo,"Compiling file" $<)
+	\$(call loginfo,"Compiling C file" $<)
 	\$(Q)mkdir -p \$(dir $@)
-	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td \$(CFLAGS) -c \$< -o $@
+	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td $(optflags:) \$(CFLAGS) -c \$< -o $@
 	\$(Q)mv -f obj/$*.Td obj/$*.d
 
+$(objdir)/%.o: %.S \$(THIS_MAKEFILE)
+	\$(call loginfo,"Compiling ASM file" $<)
+	\$(Q)mkdir -p \$(dir $@)
+	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td $(optflags:) \$(CFLAGS) -c \$< -o $@
+	\$(Q)mv -f obj/$*.Td obj/$*.d
+
+-include $(name:).mk
+
 clean:
-	\$(Q)rm -R $(bindir)
-	\$(Q)rm -R $(objdir)
+	\$(Q)rm -Rf $(bindir)
+	\$(Q)rm -Rf $(objdir)
 
 $(objdir)/%.d: ;
 \.PRECIOUS: $(objdir)/%.d
 
--include \$(patsubst %,$(objdir)/%.d,\$(basename \$(SOURCES)))
+.for exec
+-include \$(patsubst %,$(objdir)/%.d,\$(basename \$(SOURCES_$(exec.name:))))
+.endfor
