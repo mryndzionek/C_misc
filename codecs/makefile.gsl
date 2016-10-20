@@ -1,5 +1,10 @@
 .template 0
 function verify_format ()
+    for project.path
+        for project.path as p2 where !(p2.name = path.name)
+            p2.dest = string.replace (p2.dest, "\$(" + path.name + ")|" + path.dest)
+        endfor
+    endfor
     # Check if all include directories exist
     for exec
         for includes
@@ -99,6 +104,19 @@ function expand_paths (elem)
         endfor
     endfor
 endfunction
+function resolve_includes (xml)
+    for my.xml.include
+        if !defined (include.filename)
+            abort "E: required attribute 'filename' not defined"
+        endif
+        my.include_file = my.xml.load_file (filename)?
+        if defined (my.include_file)
+            move my.include_file after include
+        else
+            abort "E: <include> failed: $(xml.error?)"
+        endif
+    endfor
+endfunction
 endtemplate
 .rootdir ?= "."
 .cross_prefix ?= ""
@@ -109,10 +127,24 @@ endtemplate
 ####################################################################
 #  THIS FILE IS 100% GENERATED; DO NOT EDIT EXCEPT EXPERIMENTALLY  #
 ####################################################################"
+.resolve_includes (project)
+.for exec
+.   resolve_includes (exec)
+.endfor
 .s = verify_format ()
 .if s = -1
 .   abort 'E: Code generation failed'
 .endif
+.for exec
+.   for includes
+.       for dir
+.           for project.includes as inc where inc.name = dir.name
+.           else
+.               copy dir to project as includes
+.           endfor
+.       endfor
+.   endfor
+.endfor
 .echo "Creating file $(rootdir:)/Makefile"
 .output "$(rootdir:)/Makefile"
 $(string.trim (GENERATED_WARNING_HEADER):left, block)
@@ -126,21 +158,13 @@ OBJCOPY = \$(CROSS_COMPILE)objcopy
 SIZE = \$(CROSS_COMPILE)size
 NM = \$(CROSS_COMPILE)nm
 
-.for exec
-.   for includes
-.       for dir
-.           for project.include as inc where inc.name = dir.name
-.           else
-.               copy dir to project as include
-.           endfor
-.       endfor
-.   endfor
-.endfor
 # Include files
 INCLUDES = \\
-.for include
-    -I$(include.name:) \\
+.for includes
+    -I$(includes.name:) \\
 .endfor
+
+OPT_FLAGS = $(optflags:)
 
 # Global defines
 CFLAGS += \\
@@ -192,6 +216,11 @@ ASM_OBJ_$(exec.name:) = \$(patsubst %.S, $(objdir)/%.o, \$(filter %.S, \$(SOURCE
 
 .endfor
 vpath %.c \\
+.for vpath
+    $(name) \\
+.endfor
+
+vpath %.S \\
 .for vpath
     $(name) \\
 .endfor
@@ -249,13 +278,13 @@ $(objdir):
 $(objdir)/%.o: %.c \$(THIS_MAKEFILE)
 	\$(call loginfo,"Compiling C file" $<)
 	\$(Q)mkdir -p \$(dir $@)
-	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td $(optflags:) \$(CFLAGS) -c \$< -o $@
+	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td \$(OPT_FLAGS) \$(CFLAGS) -c \$< -o $@
 	\$(Q)mv -f obj/$*.Td obj/$*.d
 
 $(objdir)/%.o: %.S \$(THIS_MAKEFILE)
 	\$(call loginfo,"Compiling ASM file" $<)
 	\$(Q)mkdir -p \$(dir $@)
-	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td $(optflags:) \$(CFLAGS) -c \$< -o $@
+	\$(Q)\$(CC) -MT $@ -MMD -MP -MF $(objdir)/$*.Td \$(OPT_FLAGS) \$(CFLAGS) -c \$< -o $@
 	\$(Q)mv -f obj/$*.Td obj/$*.d
 
 -include $(name:).mk
