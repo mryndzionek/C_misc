@@ -260,7 +260,8 @@ $(exec.name:): \$(C_OBJ_$(exec.name:)) \$(ASM_OBJ_$(exec.name:)) \$(THIS_MAKEFIL
 		\$(C_OBJ_$(exec.name:)) \$(ASM_OBJ_$(exec.name:)) \$(LIBS) -o $(bindir)/$@.elf
 	\$(Q)\$(NM) $(bindir)/$@.elf >$(bindir)/$@.elf.txt
 	\$(Q)\$(OBJCOPY) -O binary $(bindir)/$@.elf $(bindir)/$@.bin
-	\$(Q)\$(SIZE) \$(C_OBJ_$(exec.name:)) $(bindir)/$@.elf
+	\$(Q)\$(SIZE) \$(C_OBJ_$(exec.name:))
+	\$(Q)\$(SIZE) --format=SysV $(bindir)/$@.elf
 
 .endfor
 .for exec
